@@ -1,44 +1,28 @@
-import React from 'react';
-import { Bar } from 'react-chartjs-2';
-import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend } from 'chart.js';
+import React from "react";
+import { Bar } from "react-chartjs-2";
 
-
-ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
-
-
-interface Props {
-  selectedMonth: string; 
+interface BarChartProps {
+  data: { month: string; totalRevenue: number }[];
 }
 
-const BarChart: React.FC<Props> = ({ selectedMonth }) => {
-  
-  const data = {
-    labels: ['Transaction 1', 'Transaction 2', 'Transaction 3', 'Transaction 4', 'Transaction 5'],
+const BarChart: React.FC<BarChartProps> = ({ data }) => {
+  const chartData = {
+    labels: data.map(item => item.month),
     datasets: [
       {
-        label: 'Amount ($)',
-        data: [200, 150, 300, 250, 400], 
-        backgroundColor: 'rgba(255, 205, 86, 0.6)', 
-        borderColor: 'rgba(255, 205, 86, 1)',
-        borderWidth: 1,
+        label: 'Total Revenue',
+        data: data.map(item => item.totalRevenue),
+        backgroundColor: 'rgba(75, 192, 192, 0.6)',
       },
     ],
   };
 
-  const options = {
-    responsive: true,
-    plugins: {
-      legend: {
-        position: 'top' as const,
-      },
-      title: {
-        display: true,
-        text: `Transaction Amounts for ${selectedMonth}`, 
-      },
-    },
-  };
-
-  return <Bar data={data} options={options} />;
+  return (
+    <div>
+      <h2>Revenue Bar Chart</h2>
+      <Bar data={chartData} />
+    </div>
+  );
 };
 
 export default BarChart;

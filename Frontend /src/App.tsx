@@ -1,15 +1,20 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import Home from './pages/HomePage';
-import DashboardPage from './components /dashboard/Dashboard';
+import React from "react";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
+import WelcomePage from "./components /dashboard/Dashboard";
+import TransactionTable from "./components /dashboard/TransactionTable"; 
+import TransactionStats from "./components /dashboard/TransactionStatistics"; 
+// import BarChart from "./components /dashboard/BarChart"; 
 
-const App = () => {
+const App: React.FC = () => {
   return (
-    <Router>
+    <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/" element={<WelcomePage />} />
+        <Route path="/Transaction" element={<TransactionTable/>} />
+        <Route path="/Stats" element={<TransactionStats />} />
+        {/* <Route path="/Charts" element={<BarChart/>} /> */}
       </Routes>
-    </Router>
+    </BrowserRouter>
   );
 };
 

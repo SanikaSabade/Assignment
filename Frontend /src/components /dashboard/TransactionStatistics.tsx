@@ -1,28 +1,46 @@
+import React, { useEffect, useState } from "react";
+import axios from "axios";
 
-interface StatisticsProps {
+interface SalesSummary {
   month: string;
+  totalTransactions: number;
+  totalRevenue: number;
 }
 
-const TransactionStatistics = ({ month }: StatisticsProps) => {
+const TransactionStats: React.FC = () => {
+  const [stats, setStats] = useState<SalesSummary[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      setLoading(true);
+      try {
+        const response = await axios.get("http://localhost:3000/sales-summary");
+        setStats(response.data);
+      } catch (error) {
+        console.error("Error fetching transaction stats:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchStats();
+  }, []);
+
+  if (loading) return <div>Loading...</div>;
+
   return (
-    <div className="bg-white p-6 rounded-lg shadow-sm">
-      <h2 className="text-lg font-medium mb-4">Statistics - {month}</h2>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div>
-          <p className="text-sm text-gray-600">Total Sale Amount</p>
-          <p className="text-2xl font-semibold mt-1">$12,450</p>
-        </div>
-        <div>
-          <p className="text-sm text-gray-600">Total Sold Items</p>
-          <p className="text-2xl font-semibold mt-1">45</p>
-        </div>
-        <div>
-          <p className="text-sm text-gray-600">Total Not Sold Items</p>
-          <p className="text-2xl font-semibold mt-1">15</p>
-        </div>
-      </div>
+    <div>
+      <h2>Transaction Stats</h2>
+      <ul>
+        {stats.map((stat) => (
+          <li key={stat.month}>
+            Month: {stat.month}, Total Transactions: {stat.totalTransactions}, Total Revenue: ${stat.totalRevenue}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 };
 
-export default TransactionStatistics;
+export default TransactionStats;

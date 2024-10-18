@@ -1,129 +1,161 @@
-import express from "express";
-import mongoose from "mongoose";
+import express, { Request, Response } from "express";
 import dotenv from "dotenv";
-import Product from './modules/Product';
+import mongoose from "mongoose";
+import Product, { ProductType } from "./modules/Product";
 import axios from "axios";
+import cors from "cors";
 
-// App configuration and environment setup
-dotenv.config();
 const app = express();
-const port = process.env.PORT || 5000;
-const dbURI = process.env.MONGO_URI!;
+app.use(cors());
+dotenv.config();
 
-// Database connection logic
-const initializeMongoDB = async () => {
+const portnumber: string | number = process.env.PORT || 3000;
+const url: string = process.env.DB_URL!;
+
+const connectToMongo = async (): Promise<void> => {
   try {
-    await mongoose.connect(dbURI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
-    console.log("Successfully connected to MongoDB");
+    await mongoose.connect(url);
+    console.log("Mongo connected successfully");
   } catch (error) {
-    console.error("Failed to connect to MongoDB", error);
+    console.error("Mongo did not connect", error);
   }
 };
 
-initializeMongoDB();
+connectToMongo();
 
-
-app.get("/", (req, res) => {
-  res.send("Hello, welcome to the server!");
+app.get("/", (req: Request, res: Response): void => {
+  res.send("Server running successfully.");
 });
 
 
-app.get("/initialize-db", async (req, res) => {
+app.get("/initialize-db", async (req: Request, res: Response): Promise<void> => {
   try {
+    const existingProducts = await Product.countDocuments();
+    if (existingProducts > 0) {
+      res.status(400).json({
+        msg: "Database is already initialized with data.",
+      });
+      return;
+    }
+
     const response = await axios.get(
       "https://s3.amazonaws.com/roxiler.com/product_transaction.json"
     );
-    const productData = response.data;
-    await Product.insertMany(productData);
-    res.status(200).json({ message: "Database successfully populated!" });
-  } catch (err) {
-    console.error("Error initializing the database", err);
-    res.status(500).json({ error: "Could not initialize the database" });
-  }
-});
-
-
-app.get("/products/:page", async (req, res) => {
-  const page = parseInt(req.params.page, 10);
-  const limit = 10;
-  const start = (page - 1) * limit + 1;
-
-  try {
-    const products = await Product.find({
-      id: { $gte: start, $lte: start + limit - 1 },
+    const productList: ProductType[] = response.data;
+    await Product.insertMany(productList);
+    res.status(200).json({
+      msg: "Database populated successfully",
     });
-    const totalProducts = await Product.countDocuments();
-    res.status(200).json({ products, totalProducts });
-  } catch (err) {
-    console.error("Error fetching products", err);
-    res.status(500).json({ error: "Failed to fetch products" });
+  } catch (error) {
+    res.status(500).json({
+      msg: "Error initializing database.",
+      error,
+    });
+  }
+});
+
+app.get(`/products/:page`, async (req, res) => {
+  try {
+    const page = parseInt(req.params.page);
+    const last = page * 10;
+    const first = last - 9;
+    const data = await Product.find({
+      id: {
+        $gte: first,
+        $lte: last,
+      },
+    });
+    const total = await Product.countDocuments();
+    res.status(200).json({
+      data,
+      total,
+    });
+  } catch (error) {
+    res.status(404).json({
+      msg: "failed to get products.",
+    });
   }
 });
 
 
-app.get("/search/:query", async (req, res) => {
-  const searchQuery = req.params.query;
+app.get("/search/:query", async (req: Request, res: Response): Promise<void> => {
+  const query: string = req.params.query;
+  const month: number = parseInt(req.query.month as string);
+
   try {
-    const results = await Product.find({
+    const searchConditions = {
       $or: [
-        { title: { $regex: searchQuery, $options: "i" } },
-        { description: { $regex: searchQuery, $options: "i" } },
-        { price: parseInt(searchQuery) || 0 },
+        { title: { $regex: query, $options: "i" } },
+        { description: { $regex: query, $options: "i" } },
+        { price: parseInt(query) || null },
       ],
+    };
+
+    const matchMonth = month
+      ? { $expr: { $eq: [{ $month: "$dateOfSale" }, month] } }
+      : {};
+
+    const products: ProductType[] = await Product.find({ ...searchConditions, ...matchMonth });
+
+    res.status(200).json({ products });
+  } catch (error) {
+    res.status(500).json({
+      msg: "Search failed.",
+      error,
     });
-    res.status(200).json({ results });
-  } catch (err) {
-    console.error("Search error", err);
-    res.status(500).json({ error: "Search failed" });
   }
 });
 
 
-app.get("/sales-summary/:month", async (req, res) => {
-  const month = parseInt(req.params.month, 10);
+app.get("/sales-summary/:month", async (req: Request, res: Response): Promise<void> => {
+  const month: number = parseInt(req.params.month);
+
+  if (isNaN(month) || month < 1 || month > 12) {
+    res.status(400).json({ msg: "Invalid month parameter" });
+    return;
+  }
 
   try {
-    const salesData = await Product.aggregate([
-      { $addFields: { saleMonth: { $month: "$dateOfSale" } } },
-      { $match: { saleMonth: month } },
+    const salesSummary = await Product.aggregate([
+      { $addFields: { monthOfSale: { $month: "$dateOfSale" } } },
+      { $match: { monthOfSale: month } },
       {
         $group: {
           _id: null,
           totalSold: { $sum: { $cond: [{ $eq: ["$sold", true] }, 1, 0] } },
           totalUnsold: { $sum: { $cond: [{ $eq: ["$sold", false] }, 1, 0] } },
           totalRevenue: { $sum: { $cond: [{ $eq: ["$sold", true] }, "$price", 0] } },
-          items: { $push: "$$ROOT" },
         },
       },
     ]);
 
-    if (salesData.length) {
-      const [summary] = salesData;
-      res.status(200).json({
-        items: summary.items,
-        totalSold: summary.totalSold,
-        totalUnsold: summary.totalUnsold,
-        totalRevenue: summary.totalRevenue,
-      });
+    if (salesSummary.length) {
+      const [summary] = salesSummary;
+      res.status(200).json(summary);
     } else {
-      res.status(404).json({ message: "No sales data found for this month" });
+      res.status(404).json({ message: "No sales data found for this month." });
     }
-  } catch (err) {
-    console.error("Sales summary error", err);
-    res.status(500).json({ error: "Failed to fetch sales summary" });
+  } catch (error) {
+    res.status(500).json({
+      msg: "Failed to fetch sales summary.",
+      error,
+    });
   }
 });
 
-app.get("/price-distribution/:month", async (req, res) => {
-  const month = parseInt(req.params.month, 10);
+
+app.get("/price-distribution/:month", async (req: Request, res: Response): Promise<void> => {
+  const month: number = parseInt(req.params.month);
+
+  if (isNaN(month) || month < 1 || month > 12) {
+    res.status(400).json({ msg: "Invalid month parameter" });
+    return;
+  }
 
   try {
     const priceDistribution = await Product.aggregate([
-      { $addFields: { saleMonth: { $month: "$dateOfSale" } } },
-      { $match: { saleMonth: month } },
+      { $addFields: { monthOfSale: { $month: "$dateOfSale" } } },
+      { $match: { monthOfSale: month } },
       {
         $bucket: {
           groupBy: "$price",
@@ -133,20 +165,29 @@ app.get("/price-distribution/:month", async (req, res) => {
         },
       },
     ]);
+
     res.status(200).json(priceDistribution);
-  } catch (err) {
-    console.error("Price distribution error", err);
-    res.status(500).json({ error: "Failed to fetch price distribution" });
+  } catch (error) {
+    res.status(500).json({
+      msg: "Error fetching price distribution.",
+      error,
+    });
   }
 });
 
-app.get("/category-distribution/:month", async (req, res) => {
-  const month = parseInt(req.params.month, 10);
+
+app.get("/category-distribution/:month", async (req: Request, res: Response): Promise<void> => {
+  const month: number = parseInt(req.params.month);
+
+  if (isNaN(month) || month < 1 || month > 12) {
+    res.status(400).json({ msg: "Invalid month parameter" });
+    return;
+  }
 
   try {
     const categoryDistribution = await Product.aggregate([
-      { $addFields: { saleMonth: { $month: "$dateOfSale" } } },
-      { $match: { saleMonth: month } },
+      { $addFields: { monthOfSale: { $month: "$dateOfSale" } } },
+      { $match: { monthOfSale: month } },
       {
         $group: {
           _id: "$category",
@@ -154,36 +195,46 @@ app.get("/category-distribution/:month", async (req, res) => {
         },
       },
     ]);
+
     res.status(200).json(categoryDistribution);
-  } catch (err) {
-    console.error("Category distribution error", err);
-    res.status(500).json({ error: "Failed to fetch category distribution" });
+  } catch (error) {
+    res.status(500).json({
+      msg: "Error fetching category distribution.",
+      error,
+    });
   }
 });
 
 
-app.get("/combined-data/:month", async (req, res) => {
-  const month = parseInt(req.params.month, 10);
+app.get("/combined-data/:month", async (req: Request, res: Response): Promise<void> => {
+  const month: number = parseInt(req.params.month);
+
+  if (isNaN(month) || month < 1 || month > 12) {
+    res.status(400).json({ msg: "Invalid month parameter" });
+    return;
+  }
 
   try {
-    const [salesResponse, barChartResponse, pieChartResponse] = await Promise.all([
+    const [salesSummary, priceDistribution, categoryDistribution] = await Promise.all([
       axios.get(`${process.env.BASE_URL}/sales-summary/${month}`),
       axios.get(`${process.env.BASE_URL}/price-distribution/${month}`),
       axios.get(`${process.env.BASE_URL}/category-distribution/${month}`),
     ]);
 
     res.status(200).json({
-      salesData: salesResponse.data,
-      barChartData: barChartResponse.data,
-      pieChartData: pieChartResponse.data,
+      salesSummary: salesSummary.data,
+      priceDistribution: priceDistribution.data,
+      categoryDistribution: categoryDistribution.data,
     });
-  } catch (err) {
-    console.error("Combined data error", err);
-    res.status(500).json({ error: "Failed to fetch combined data" });
+  } catch (error) {
+    res.status(500).json({
+      msg: "Error fetching combined data.",
+      error,
+    });
   }
 });
 
 
-app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
-});
+app.listen(portnumber, () =>
+  console.log(`Server running on port ${portnumber}`)
+);
